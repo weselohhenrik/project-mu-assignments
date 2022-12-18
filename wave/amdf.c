@@ -35,11 +35,12 @@ struct wav_hdr {
 	struct data_hdr data;
 };
 
-int main()
+int main(int argc, char *argv[])
 {
+	char *file_name = argv[1];
 
 	struct wav_hdr header = {0};
-	FILE *fp = fopen(".\\output.wav", "rb");
+	FILE *fp = fopen(file_name, "rb");
 	if (fp == NULL) {
 		printf("Could not open file\n");
 		return 1;
@@ -101,7 +102,16 @@ int main()
 	fseek(fp, 0, SEEK_CUR);
 	fread(data, sizeof(data), 1, fp);
 	printf("Read data successfully\n");
-	
+
+	size_t analyze_size = (header.fmt.bytes_per_sec /1000) * 50;
+	sample_t *analyze_sample = malloc(analyze_size);
+
+	// load first 50 ms
+	for (int i = 0; i < analyze_size; i++) {
+		analyze_sample[i] = data[i];
+	}
+
+	// calculate AMDF
 
 	fclose(fp);
     return 0;
