@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 
 typedef int8_t fourcc[4];
 typedef int16_t sample_t;
@@ -34,6 +35,38 @@ struct wav_hdr {
 	struct fmt_ck fmt;
 	struct data_hdr data;
 };
+
+void write_wav_file(const struct wav_hdr header, const sample_t *data, const char *file_name)
+{
+	int err;
+	FILE *wav_file;
+	if ((err = fopen_s(&wav_file, file_name, "w")) != 0) {
+		printf("Error opening wav file\n");
+	} else {
+		fwrite(&header, sizeof(struct wav_hdr), 1, wav_file);
+		fwrite(data, header.data.size, 1, wav_file);
+	}
+}
+
+void write_samples_to_csv(const sample_t *samples, const size_t buffer_size ,const char *file_name) 
+{
+	int err;
+	FILE *csv_file;
+	if ((err = fopen_s(&csv_file, file_name, "w")) != 0) {
+		printf("Error opening file for writing csv file\n");
+		 
+	} else {
+		printf("Hello\n");
+		char comma_new_line[] = ",\n";
+		for (int i = 0; i < buffer_size/sizeof(sample_t); i++) {
+			uint32_t data_point = samples[i];
+			//fwrite(&data_point, sizeof(samples[i]), 1, csv_file);
+			//fwrite(comma_new_line, sizeof(comma_new_line), 1, csv_file);
+			fprintf(csv_file, "%u,\n", samples[i]);
+		}
+	}
+	fclose(csv_file);
+}
 
 int main(int argc, char *argv[])
 {
@@ -100,19 +133,37 @@ int main(int argc, char *argv[])
 
 	sample_t *data = malloc(header.data.size);
 	fseek(fp, 0, SEEK_CUR);
-	fread(data, sizeof(data), 1, fp);
+	fread(data, header.data.size, 1, fp);
+	write_wav_file(header, data, "test.wav");
 	printf("Read data successfully\n");
 
-	size_t analyze_size = (header.fmt.bytes_per_sec /1000) * 50;
-	sample_t *analyze_sample = malloc(analyze_size);
-
+	size_t analyze_size = (44100 /1000) * 50;
+	sample_t *analyze_sample = malloc(analyze_size * sizeof(sample_t));
 	// load first 50 ms
-	for (int i = 0; i < analyze_size; i++) {
+	for (size_t i = 0; i < analyze_size; i++) {
 		analyze_sample[i] = data[i];
 	}
+	write_samples_to_csv(analyze_sample, analyze_size * sizeof(sample_t), "analyze.csv");
 
 	// calculate AMDF
+	sample_t *amdf = malloc(analyze_size * sizeof(sample_t));
+	for (int k = 0; k < analyze_size; k++) {
+		sample_t g = 0;
+		
+		for (int n = 0; n < (analyze_size - k - 1); n++) {
+			sample_t x = analyze_sample[n];
+			int index = n + k;
+			sample_t x_off = analyze_sample[index];
+			sample_t result = abs(x - x_off);
+			g += result;
+		}
+		amdf[k] = g/(analyze_size-k);
+	}
+
+	write_samples_to_csv(amdf, analyze_size * sizeof(sample_t), "amdf.csv");
 
 	fclose(fp);
+	free(amdf);
+	free(analyze_sample);
     return 0;
 }
