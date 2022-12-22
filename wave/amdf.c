@@ -4,8 +4,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
+#include "csv.h"
 
-typedef int8_t fourcc[4];
+typedef uint8_t fourcc[4];
 typedef int16_t sample_t;
 
 struct riff_hdr {
@@ -40,7 +41,7 @@ void write_wav_file(const struct wav_hdr header, const sample_t *data, const cha
 {
 	int err;
 	FILE *wav_file;
-	if ((err = fopen_s(&wav_file, file_name, "w")) != 0) {
+	if ((err = fopen_s(&wav_file, file_name, "wb")) != 0) {
 		printf("Error opening wav file\n");
 	} else {
 		fwrite(&header, sizeof(struct wav_hdr), 1, wav_file);
@@ -48,25 +49,46 @@ void write_wav_file(const struct wav_hdr header, const sample_t *data, const cha
 	}
 }
 
-void write_samples_to_csv(const sample_t *samples, const size_t buffer_size ,const char *file_name) 
+double AMDF(sample_t *samples, size_t buf_size, int tau)
 {
-	int err;
-	FILE *csv_file;
-	if ((err = fopen_s(&csv_file, file_name, "w")) != 0) {
-		printf("Error opening file for writing csv file\n");
-		 
-	} else {
-		printf("Hello\n");
-		char comma_new_line[] = ",\n";
-		for (int i = 0; i < buffer_size/sizeof(sample_t); i++) {
-			uint32_t data_point = samples[i];
-			//fwrite(&data_point, sizeof(samples[i]), 1, csv_file);
-			//fwrite(comma_new_line, sizeof(comma_new_line), 1, csv_file);
-			fprintf(csv_file, "%u,\n", samples[i]);
+	double sum = 0;
+	size_t sample_len = buf_size/sizeof(sample_t);
+	for (int i = 0; i < (sample_len - tau); i++) {
+		int32_t sample_a = samples[i];
+		int32_t sample_b = samples[i+tau];
+		int32_t diff = sample_a -sample_b;
+		sum += abs(diff);
+	}
+
+	return sum/(sample_len-tau); 
+}
+
+int16_t* local_minimum(double *samples, size_t buf_size, int bounds)
+{
+	int16_t *local_minima = malloc(buf_size);
+	int minima_index = 0;
+	for (int i = bounds+1 ; i < buf_size; i++) {
+		if (samples[i] < samples[i-1] && samples[i] < samples[i+1]) {
+			local_minima[minima_index] = i;
+			minima_index += 1;
 		}
 	}
-	fclose(csv_file);
+	return local_minima;
 }
+
+double detect_pitches_amdf(sample_t *samples, size_t buf_size, uint32_t sample_rate, int bounds)
+{
+	size_t sample_num = buf_size/sizeof(sample_t);
+	double amdf_vals[sample_num * sizeof(double)];
+	for (int i = 1; i < sample_num; i++) {
+		amdf_vals[i] = AMDF(samples, buf_size, i);
+	}
+	write_samples_to_csv_d(amdf_vals, buf_size, "amdf.csv");
+	sample_t *sample = local_minimum(amdf_vals, buf_size, bounds);
+	sample_t period = sample[1]-sample[0];
+	return (double)sample_rate/ period;
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -131,9 +153,11 @@ int main(int argc, char *argv[])
 	fread(&header.data.size, sizeof(header.data.size), 1, fp);
 	printf("DATA SIZE: %u\n", header.data.size);
 
-	sample_t *data = malloc(header.data.size);
+	sample_t *data = malloc(header.data.size * sizeof(sample_t));
 	fseek(fp, 0, SEEK_CUR);
-	fread(data, header.data.size, 1, fp);
+	fread(data, sizeof(sample_t), header.data.size, fp);
+	
+	
 	write_wav_file(header, data, "test.wav");
 	printf("Read data successfully\n");
 
@@ -141,29 +165,15 @@ int main(int argc, char *argv[])
 	sample_t *analyze_sample = malloc(analyze_size * sizeof(sample_t));
 	// load first 50 ms
 	for (size_t i = 0; i < analyze_size; i++) {
-		analyze_sample[i] = data[i];
+		analyze_sample[i] = data[i+1024];
 	}
-	write_samples_to_csv(analyze_sample, analyze_size * sizeof(sample_t), "analyze.csv");
+	write_samples_to_csv_sample(analyze_sample, analyze_size * sizeof(sample_t), "analyze.csv");
+	
+	double frequency = detect_pitches_amdf(analyze_sample, analyze_size * sizeof(sample_t), header.fmt.samples_per_sec, 0);
 
-	// calculate AMDF
-	sample_t *amdf = malloc(analyze_size * sizeof(sample_t));
-	for (int k = 0; k < analyze_size; k++) {
-		sample_t g = 0;
-		
-		for (int n = 0; n < (analyze_size - k - 1); n++) {
-			sample_t x = analyze_sample[n];
-			int index = n + k;
-			sample_t x_off = analyze_sample[index];
-			sample_t result = abs(x - x_off);
-			g += result;
-		}
-		amdf[k] = g/(analyze_size-k);
-	}
-
-	write_samples_to_csv(amdf, analyze_size * sizeof(sample_t), "amdf.csv");
+	printf("Frequency: %f\n", frequency);
 
 	fclose(fp);
-	free(amdf);
-	free(analyze_sample);
+	free(analyze_sample); 
     return 0;
 }
