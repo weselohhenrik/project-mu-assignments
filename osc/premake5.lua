@@ -5,18 +5,21 @@ workspace "osc_ws"
 
 project "terrain"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     architecture "x86_64"
     toolset "msc"
     location "build/terrain"
     targetdir "bin/%{cfg.buildcfg}"
-    files { "src/terrain/*.c", "src/terrain/*.h" }
+    files { "src/terrain/*.c", "src/terrain/*.h", "src/terrain/*.cpp"}
     includedirs { "include" }
     libdirs { "lib" }
     links { 
         "libjack64",
         "libjacknet64",
         "libjackserver64",
+        "opengl32",
+        "imgui",
+        "glfw3"
     }
     filter "configurations:Debug"
       defines { "DEBUG" }
@@ -28,18 +31,21 @@ project "terrain"
 
 project "phs"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     architecture "x86_64"
     toolset "msc"
     location "build/phs"
     targetdir "bin/%{cfg.buildcfg}"
-    files { "src/phs/*.c", "src/phs/*.h" }
+    files { "src/phs/*.c", "src/phs/*.h", "src/phs/*.cpp"}
     includedirs { "include" }
     libdirs { "lib" }
     links { 
         "libjack64",
         "libjacknet64",
         "libjackserver64",
+        "opengl32",
+        "imgui",
+        "glfw3"
     }
     filter "configurations:Debug"
       defines { "DEBUG" }
