@@ -1,28 +1,67 @@
 use jack::AudioOut;
 use std::f32::consts::TAU;
-use std::{io, io::Read, process};
+use std::process;
 
-const FREQ: f32 = 440.0;
+//const FREQ: f32 = 440.0;
 const AMP: f32 = 0.1;
 
-// this is what you get when static mut variables are unsafe
-struct Phs {
-  phs: f32,
-  out: jack::Port<AudioOut>,
+
+struct PhsApp {
+  freq: f32,
+  sender: crossbeam::channel::Sender<f32>
 }
-impl jack::ProcessHandler for Phs {
+
+impl eframe::App for PhsApp {
+  fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+      frame.set_window_size(egui::Vec2{x: 500.0, y: 500.0});
+
+      egui::CentralPanel::default().show(ctx, |ui| {
+        if ui.button("Increase").clicked() {
+          self.freq += 5.0;
+          self.sender.send(self.freq).unwrap();
+        }
+        if ui.button("Decrease").clicked() {
+          self.freq -= 5.0;
+          self.sender.send(self.freq).unwrap();
+        }
+    });
+  } 
+}
+struct PhsDriver {
+  command_receiver: crossbeam::channel::Receiver<f32>,
+  phs: f32,
+  freq: f32,
+  last_freq: f32,
+  phs_out: jack::Port<AudioOut>,
+  freq_out: jack::Port<AudioOut>
+}
+
+
+impl jack::ProcessHandler for PhsDriver {
   fn process(
     &mut self,
     client: &jack::Client,
     ps: &jack::ProcessScope,
   ) -> jack::Control {
     let sr = client.sample_rate() as f32;
-    let out = self.out.as_mut_slice(ps);
+    let phs_buffer = self.phs_out.as_mut_slice(ps);
+    let freq_buffer = self.freq_out.as_mut_slice(ps);
+    let freq_result = self.command_receiver.try_recv();
 
-    for o in out.iter_mut() {
+    let freq = match freq_result {
+        Ok(f) => { f }
+        Err(_) => { 0.0 }
+    };
+
+    if freq != 0.0 {
+      self.last_freq = freq;
+    }
+    self.freq = self.last_freq;
+
+    for (i, o) in phs_buffer.iter_mut().enumerate() {
       *o = AMP * (TAU * self.phs).sin();
-
-      self.phs += FREQ / sr;
+      freq_buffer[i] = self.freq;
+      self.phs += self.freq / sr;
       while self.phs >= 1.0 {
         self.phs -= 1.0;
       }
@@ -51,24 +90,36 @@ fn main() {
   }
 
   // register output audio port
-  let port_out = client
-    .register_port("out", AudioOut::default())
+  let phs_out_port = client
+    .register_port("phs", AudioOut::default())
     .unwrap_or_die("fail to register port");
 
-  // activate client
-  let phs = Phs {
+  let freq_out_port = client
+    .register_port("freq", AudioOut::default())
+    .unwrap_or_die("fail to register port");
+
+  let (sender, receiver) = crossbeam::channel::unbounded();
+  let phs_driver = PhsDriver {
     phs: 0.0,
-    out: port_out,
+    freq: 220.0,
+    last_freq: 220.0,
+    phs_out: phs_out_port,
+    freq_out: freq_out_port,
+    command_receiver: receiver
   };
-  
+
+  let phs_app = PhsApp {
+    freq: 220.0,
+    sender: sender
+  };
+
+  // activate client
   let client_active = client
-    .activate_async(ShutdownHandler, phs)
+    .activate_async(ShutdownHandler, phs_driver)
     .unwrap_or_die("fail to activate client");
 
-  // idle the main thread
-  //   clean signal handling in rust requires external
-  //   crates, so we will ignore them here
-  io::stdin().read_exact(&mut [0]).unwrap_or(()); // a.k.a. getchar
+  let native_options = eframe::NativeOptions::default();
+  eframe::run_native("PHS", native_options, Box::new(|_| Box::new(phs_app)));
 
   client_active
     .deactivate()

@@ -3,16 +3,50 @@ use jack::AudioIn;
 use std::f32::consts::TAU;
 use std::{io, io::Read, process};
 
-const FREQ: f32 = 440.0;
+//const FREQ: f32 = 440.0;
 const AMP: f32 = 0.1;
+const TBL_LEN: usize = 512;
 
-// this is what you get when static mut variables are unsafe
-struct Sine {
+struct WaveTable {
+  tbl: Vec<f32>
+}
+
+impl WaveTable {
+  fn new() -> WaveTable {
+    let step = 1.0 / TBL_LEN as f32;
+
+    let mut table = WaveTable {
+      tbl: vec![]
+    };
+    
+    for i in 0..TBL_LEN {
+      table.tbl.push(TAU * (i as f32) * step)
+    }
+    table
+  }
+
+  fn eval(&self, phs: f32) -> f32 {
+    let mut fractional = phs  * (TBL_LEN as f32);
+    let integer = fractional.floor() as usize;
+
+    fractional = fractional - integer as f32;
+
+    let x0 = self.tbl[integer];
+    let x1 = self.tbl[(integer + 1) % TBL_LEN];
+
+    (1.0 - fractional)*x0 + fractional*x1
+  }
+
+}
+
+struct OscDriver {
+  tbl: WaveTable,
   phs: f32,
-  in_port: jack::Port<AudioIn>,
+  phs_in: jack::Port<AudioIn>,
+  freq_in: jack::Port<AudioIn>,
   out: jack::Port<AudioOut>,
 }
-impl jack::ProcessHandler for Sine {
+impl jack::ProcessHandler for OscDriver {
   fn process(
     &mut self,
     client: &jack::Client,
@@ -21,11 +55,13 @@ impl jack::ProcessHandler for Sine {
     let sr = client.sample_rate() as f32;
     let out = self.out.as_mut_slice(ps);
 
-    let in_buffer = self.in_port.as_slice(ps);
-    for o in out.iter_mut() {
-      *o = AMP * (TAU * self.phs).sin();
+    let phs_buffer = self.phs_in.as_slice(ps);
+    let freq_buffer = self.freq_in.as_slice(ps);
+    for (i, o) in out.iter_mut().enumerate() {
+      //*o = AMP * (TAU * phs_buffer[i]).sin();
+      *o = AMP * self.tbl.eval(phs_buffer[i]);
 
-      self.phs += FREQ / sr;
+      self.phs += freq_buffer[i] / sr;
       while self.phs >= 1.0 {
         self.phs -= 1.0;
       }
@@ -43,6 +79,9 @@ impl jack::NotificationHandler for ShutdownHandler {
 }
 
 fn main() {
+  // initialize table
+  let tbl = WaveTable::new();
+
   // open client
   let (client, status) = jack::Client::new(
     "terrain", jack::ClientOptions::NO_START_SERVER
@@ -58,19 +97,22 @@ fn main() {
     .register_port("out", AudioOut::default())
     .unwrap_or_die("fail to register port");
 
-  let port_in = client
-        .register_port("in", AudioIn::default())
+  let phs_in_port = client
+        .register_port("phs", AudioIn::default())
         .unwrap_or_die("fail to register poirt");
-
-
+  let freq_in_port = client
+        .register_port("freq", AudioIn::default())
+        .unwrap_or_die("fail to register poirt");
   // activate client
-  let sine = Sine {
+  let osc_driver = OscDriver {
     phs: 0.0,
-    in_port: port_in,
+    tbl,
+    phs_in: phs_in_port,
+    freq_in: freq_in_port,
     out: port_out,
   };
   let client_active = client
-    .activate_async(ShutdownHandler, sine)
+    .activate_async(ShutdownHandler, osc_driver)
     .unwrap_or_die("fail to activate client");
 
   // idle the main thread
