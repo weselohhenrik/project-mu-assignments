@@ -3,8 +3,6 @@ use std::f32::consts::TAU;
 use std::process;
 
 //const FREQ: f32 = 440.0;
-const AMP: f32 = 0.1;
-
 
 struct PhsApp {
   freq: f32,
@@ -59,8 +57,9 @@ impl jack::ProcessHandler for PhsDriver {
     self.freq = self.last_freq;
 
     for (i, o) in phs_buffer.iter_mut().enumerate() {
-      *o = AMP * (TAU * self.phs).sin();
+      *o = (TAU * self.phs).sin();
       freq_buffer[i] = self.freq;
+      //println!("phs: {:?}", self.phs);
       self.phs += self.freq / sr;
       while self.phs >= 1.0 {
         self.phs -= 1.0;
