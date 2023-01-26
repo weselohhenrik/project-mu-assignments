@@ -6,6 +6,7 @@ use std::process;
 
 struct PhsApp {
   freq: f32,
+  last_freq: f32,
   sender: crossbeam::channel::Sender<f32>
 }
 
@@ -14,13 +15,10 @@ impl eframe::App for PhsApp {
       frame.set_window_size(egui::Vec2{x: 500.0, y: 500.0});
 
       egui::CentralPanel::default().show(ctx, |ui| {
-        if ui.button("Increase").clicked() {
-          self.freq += 5.0;
+        ui.add(egui::Slider::new(&mut self.freq, 50.0..=600.0).text("frequency"));
+        if self.freq != self.last_freq {
           self.sender.send(self.freq).unwrap();
-        }
-        if ui.button("Decrease").clicked() {
-          self.freq -= 5.0;
-          self.sender.send(self.freq).unwrap();
+          self.last_freq = self.freq;
         }
     });
   } 
@@ -109,6 +107,7 @@ fn main() {
 
   let phs_app = PhsApp {
     freq: 220.0,
+    last_freq: 220.0,
     sender: sender
   };
 
