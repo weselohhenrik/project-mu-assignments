@@ -15,9 +15,93 @@ typedef jack_default_audio_sample_t sample_t;
 static jack_client_t* client = NULL;
 static jack_port_t* port_out = NULL;
 
+static float AMP = 0.1f;
+
+static jack_nframes_t sr;
+static size_t five_ms_sample_count;
+
+#define BUF_LEN 512
+static sample_t buffer[BUF_LEN];
+static float burst_factor = 0.0f;
+
+/* ------------------ ar ------------------ */
+
+#define eps 0.001f
+
+static float atk = 0.002f;
+static float rel = 0.002f;
+
+enum State {
+    IDLE,
+    ATTACK,
+    RELEASE
+};
+
+static float
+ratio2pole(float t, float ratio)
+{
+    return powf(ratio, 1 / (t * sr));
+}
+
+static sample_t
+ar_tick(sample_t gate)
+{
+    static enum State state = IDLE;
+    static sample_t gate_old = 0;
+    static sample_t out = 0;
+
+    static float pole;
+    static sample_t target;
+
+    if (gate > gate_old) {        /* 0 -> 1 */
+        state = ATTACK;
+        target = 1 + eps;
+        pole = ratio2pole(atk, eps / target);
+    }
+    else if (gate < gate_old) { /* 1 -> 0 */
+        state = RELEASE;
+        target = -eps;
+        pole = ratio2pole(rel, eps / (1 + eps));
+    }
+
+    gate_old = gate;
+    out = (1 - pole) * target + pole * out;
+
+    switch (state) {
+    case IDLE:
+        return 0;
+    case ATTACK:
+        if (out >= 1) {
+            out = 1;
+            state = RELEASE;
+            target = -eps;
+            pole = ratio2pole(rel, eps / (1 + eps));
+        }
+        break;
+    case RELEASE:
+        if (out <= 0) {
+            out = 0;
+            state = IDLE;
+        }
+        break;
+    }
+    return out;
+}
+
+/* ------------------ /ar ------------------ */
+
 static void buf_init()
 {
+    five_ms_sample_count = (sr / 1000) * 5;
+    for (int i = 0; i < BUF_LEN; ++i) {
+        buffer[i] = (float)rand() / RAND_MAX;
+    }
 
+}
+
+static float random(float min, float max)
+{
+    return (rand() / (float)RAND_MAX)* (max - min) + min;
 }
 
 
@@ -30,7 +114,7 @@ static int on_process(jack_nframes_t nframes, void* arg)
 
     static float phs_f = 0.0f;
     for (i = 0; i < nframes; ++i) {
-
+        out[i] = ar_tick(burst_factor) * random(-1.0f, 1.0f);
     }
     return 0;
 }
@@ -42,9 +126,11 @@ static void glfw_error_callback(int error, const char* message)
 
 static void jack_init(void)
 {
-    client = jack_client_open("terrain", JackNoStartServer, NULL);
+    client = jack_client_open("excite", JackNoStartServer, NULL);
 
     jack_set_process_callback(client, on_process, NULL);
+
+    sr = jack_get_sample_rate(client);
 
     port_out = jack_port_register(client, "out", JACK_DEFAULT_AUDIO_TYPE,
         JackPortIsOutput, 0);
@@ -54,6 +140,17 @@ static void jack_finish(void)
 {
     jack_deactivate(client);
     jack_client_close(client);
+}
+
+void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    if (key == GLFW_KEY_A && action == GLFW_PRESS) {
+        burst_factor = 1.0f;
+        five_ms_sample_count = 0;
+    }
+    if (key == GLFW_KEY_A && action == GLFW_RELEASE) {
+        burst_factor = 0.0f;
+    }
 }
 
 int main(void)
@@ -74,6 +171,8 @@ int main(void)
     }
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
+
+    glfwSetKeyCallback(window, key_callback);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();

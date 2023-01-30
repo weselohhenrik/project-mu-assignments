@@ -45,7 +45,7 @@ static void glfw_error_callback(int error, const char* message)
 
 static void jack_init(void)
 {
-    client = jack_client_open("terrain", JackNoStartServer, NULL);
+    client = jack_client_open("kps", JackNoStartServer, NULL);
 
     jack_set_process_callback(client, on_process, NULL);
 
