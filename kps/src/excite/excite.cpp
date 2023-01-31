@@ -20,8 +20,6 @@ static float AMP = 0.1f;
 static jack_nframes_t sr;
 static size_t five_ms_sample_count;
 
-#define BUF_LEN 512
-static sample_t buffer[BUF_LEN];
 static float burst_factor = 0.0f;
 
 /* ------------------ ar ------------------ */
@@ -90,15 +88,6 @@ ar_tick(sample_t gate)
 
 /* ------------------ /ar ------------------ */
 
-static void buf_init()
-{
-    five_ms_sample_count = (sr / 1000) * 5;
-    for (int i = 0; i < BUF_LEN; ++i) {
-        buffer[i] = (float)rand() / RAND_MAX;
-    }
-
-}
-
 static float random(float min, float max)
 {
     return (rand() / (float)RAND_MAX)* (max - min) + min;
@@ -112,7 +101,6 @@ static int on_process(jack_nframes_t nframes, void* arg)
 
     out = static_cast<sample_t*>(jack_port_get_buffer(port_out, nframes));
 
-    static float phs_f = 0.0f;
     for (i = 0; i < nframes; ++i) {
         out[i] = ar_tick(burst_factor) * random(-1.0f, 1.0f);
     }
@@ -156,7 +144,6 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 int main(void)
 {
     jack_init();
-    buf_init();    /* <- must be called before activating client */
     jack_activate(client);
 
     glfwSetErrorCallback(glfw_error_callback);
